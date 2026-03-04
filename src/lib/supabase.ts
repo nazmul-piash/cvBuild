@@ -1,19 +1,15 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const getEnv = (name: string) => {
-  return import.meta.env[name] || 
-         import.meta.env[`VITE_${name}`] || 
-         (typeof process !== 'undefined' ? (process.env[name] || process.env[`VITE_${name}`]) : undefined);
-};
-
-const supabaseUrl = getEnv('SUPABASE_URL');
-const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY');
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 
+                   (typeof process !== 'undefined' ? process.env.VITE_SUPABASE_URL : undefined);
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 
+                      (typeof process !== 'undefined' ? process.env.VITE_SUPABASE_ANON_KEY : undefined);
 
 // We use a proxy or a getter to prevent crashing on module load
 // while still providing a helpful error if the client is actually used.
 let supabaseInstance: SupabaseClient | null = null;
 
-export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && supabaseUrl !== 'undefined' && supabaseAnonKey !== 'undefined');
 
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_, prop) {
