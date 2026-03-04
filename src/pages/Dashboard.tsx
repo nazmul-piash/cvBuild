@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from '../components/Navbar.tsx';
 import { Upload, FileText, Download, Loader } from 'lucide-react';
+import { supabase } from '../lib/supabase.ts';
 
 interface CVHistory {
   id: number;
@@ -22,11 +23,13 @@ export const Dashboard: React.FC = () => {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch('/api/cv/history');
-      if (res.ok) {
-        const data = await res.json();
-        setHistory(data);
-      }
+      const { data, error } = await supabase
+        .from('cvs')
+        .select('id, original_filename, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setHistory(data || []);
     } catch (error) {
       console.error('Failed to fetch history', error);
     }
@@ -48,8 +51,13 @@ export const Dashboard: React.FC = () => {
     formData.append('jobDescription', jobDescription);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
       const res = await fetch('/api/cv/optimize', {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
         body: formData,
       });
 
@@ -69,8 +77,9 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleDownload = (id: number) => {
-    window.open(`/api/cv/download/${id}`, '_blank');
+  const handleDownload = async (id: number) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    window.open(`/api/cv/download/${id}?token=${session?.access_token}`, '_blank');
   };
 
   return (

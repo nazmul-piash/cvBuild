@@ -4,21 +4,34 @@ import mammoth from 'mammoth';
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
+import { createClient } from '@supabase/supabase-js';
 
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 import { GoogleGenAI } from '@google/genai';
-import db from './db.ts';
-import { authenticateToken, AuthRequest } from './middleware.ts';
 import { generatePDF } from './pdf.ts';
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
+const supabase = createClient(process.env.VITE_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Middleware to verify Supabase token
+const verifySupabaseToken = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization || (req.query.token ? `Bearer ${req.query.token}` : null);
+  if (!authHeader) return res.status(401).json({ error: 'No token provided' });
+
+  const token = authHeader.split(' ')[1];
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+
+  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+  req.user = user;
+  next();
+};
+
 // Upload and Optimize CV
-router.post('/optimize', authenticateToken, upload.single('cv'), async (req: AuthRequest, res) => {
+router.post('/optimize', verifySupabaseToken, upload.single('cv'), async (req: any, res: any) => {
   try {
     const { jobDescription } = req.body;
     const file = req.file;
@@ -41,7 +54,7 @@ router.post('/optimize', authenticateToken, upload.single('cv'), async (req: Aut
     }
 
     // Call Gemini API
-    const response = await genAI.models.generateContent({
+    const aiResponse = await genAI.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `
       You are an expert German HR consultant. 
@@ -70,21 +83,30 @@ router.post('/optimize', authenticateToken, upload.single('cv'), async (req: Aut
     `
     });
 
-    const optimizedContent = response.text;
+    const optimizedContent = aiResponse.text;
 
-    // Store in DB
-    const stmt = db.prepare(`
-      INSERT INTO cvs (user_id, original_filename, extracted_text, job_description, optimized_content)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const info = stmt.run(req.user!.id, file.originalname, extractedText, jobDescription, optimizedContent);
+    // Store in Supabase
+    const { data, error } = await supabase
+      .from('cvs')
+      .insert([
+        { 
+          user_id: req.user.id, 
+          original_filename: file.originalname, 
+          extracted_text: extractedText, 
+          job_description: jobDescription, 
+          optimized_content: optimizedContent 
+        }
+      ])
+      .select();
+
+    if (error) throw error;
 
     // Clean up uploaded file
     fs.unlinkSync(file.path);
 
     res.json({ 
       message: 'CV optimized successfully', 
-      id: info.lastInsertRowid,
+      id: data[0].id,
       optimizedContent 
     });
 
@@ -95,42 +117,27 @@ router.post('/optimize', authenticateToken, upload.single('cv'), async (req: Aut
 });
 
 // Download PDF
-router.get('/download/:id', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/download/:id', verifySupabaseToken, async (req: any, res: any) => {
   try {
-    const stmt = db.prepare('SELECT * FROM cvs WHERE id = ? AND user_id = ?');
-    const cv = stmt.get(req.params.id, req.user!.id) as any;
+    const { data: cv, error } = await supabase
+      .from('cvs')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id)
+      .single();
 
-    if (!cv) {
+    if (error || !cv) {
       return res.status(404).json({ error: 'CV not found' });
     }
 
     const pdfPath = path.join('uploads', `cv-${cv.id}.pdf`);
-    
-    // Generate PDF if it doesn't exist (or always regenerate for MVP simplicity)
     await generatePDF(cv.optimized_content, pdfPath);
 
-    res.download(pdfPath, 'Lebenslauf_Optimized.pdf', (err) => {
-      if (err) {
-        console.error(err);
-      }
-      // Optional: delete file after download
-      // fs.unlinkSync(pdfPath); 
-    });
+    res.download(pdfPath, 'Lebenslauf_Optimized.pdf');
 
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error generating PDF' });
-  }
-});
-
-// Get History
-router.get('/history', authenticateToken, (req: AuthRequest, res) => {
-  try {
-    const stmt = db.prepare('SELECT id, original_filename, created_at FROM cvs WHERE user_id = ? ORDER BY created_at DESC');
-    const cvs = stmt.all(req.user!.id);
-    res.json(cvs);
-  } catch (error) {
-    res.status(500).json({ error: 'Server error' });
   }
 });
 

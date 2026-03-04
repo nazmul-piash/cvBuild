@@ -20,7 +20,6 @@ async function startServer() {
   app.use(cookieParser());
 
   // API Routes
-  app.use('/api/auth', authRouter);
   app.use('/api/cv', cvRouter);
 
   app.get('/api/health', (req, res) => {
@@ -34,9 +33,26 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // SPA fallback for development
+    app.use('*', async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
-    // Production static file serving (if needed later)
-    app.use(express.static(path.join(__dirname, 'dist')));
+    // Production static file serving
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
