@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase.ts';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.ts';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   logout: () => Promise<void>;
+  isConfigured: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -15,6 +16,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return;
+    }
+
     // Check active sessions and subscribe to auth changes
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
@@ -30,11 +36,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut();
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, logout, loading }}>
+    <AuthContext.Provider value={{ user, logout, loading, isConfigured: isSupabaseConfigured }}>
       {children}
     </AuthContext.Provider>
   );
