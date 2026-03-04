@@ -14,7 +14,14 @@ import { generatePDF } from './pdf.ts';
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
-const supabase = createClient(process.env.VITE_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const getBackendEnv = (name: string) => {
+  return process.env[`VITE_${name}`] || process.env[name];
+};
+
+const supabaseUrl = getBackendEnv('SUPABASE_URL');
+const supabaseServiceKey = getBackendEnv('SUPABASE_SERVICE_ROLE_KEY');
+
+const supabase = createClient(supabaseUrl || '', supabaseServiceKey || '');
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Middleware to verify Supabase token
